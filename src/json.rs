@@ -27,7 +27,7 @@ pub fn to_writer<W, T>(mask: Mask, writer: W, value: &T) -> Result<()>
         T: ?Sized + Serialize,
 {
     let mut serializer = serde_json::Serializer::new(writer);
-    let mut masked_serializer : MaskedSerializer<serde_json::Serializer<W>> = MaskedSerializer::new(&mut serializer, &mask);
+    let mut masked_serializer = MaskedSerializer::new(&mut serializer, mask);
     value.serialize(&mut masked_serializer)
 }
 
@@ -39,7 +39,7 @@ pub fn to_writer_pretty<W, T>(mask: Mask, writer: W, value: &T) -> Result<()>
         T: ?Sized + Serialize,
 {
     let mut serializer = serde_json::Serializer::pretty(writer);
-    let mut masked_serializer : MaskedSerializer<serde_json::Serializer<W, PrettyFormatter<'_>>> = MaskedSerializer::new(&mut serializer, &mask);
+    let mut masked_serializer = MaskedSerializer::new(&mut serializer, mask);
     value.serialize(&mut masked_serializer)
 }
 
