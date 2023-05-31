@@ -72,13 +72,6 @@ impl<S> Repro<S>
     }
 }
 
-fn wut() {
-    let mut test = serde_json::Serializer::new(Vec::with_capacity(128));
-    //let a = test.Copy();
-    test.serialize_bool(true).unwrap();
-    test.serialize_bool(true).unwrap();
-}
-
 #[cfg(test)]
 mod tests {
     use serde::Serializer;
@@ -86,14 +79,8 @@ mod tests {
     use crate::serialize::{Mask, MaskedSerializer};
     use super::*;
 
-    fn example<T: serde::Serializer>(serializer: T) {
-        serializer.serialize_bool(true).unwrap();
-    }
-
-
     #[test]
     fn happy_path_serialize_deserialize() {
-
         let mut map: HashMap<&str, HashMap<&str, &str>> = HashMap::new();
 
         let mut m1 : HashMap<&str, &str> = HashMap::new();

@@ -8,45 +8,55 @@ pub struct Mask {
     properties: HashMap<String, Mask>
 }
 
-pub enum MaskedWrapper<'a, S: 'a>
-where &'a mut S: Serializer
+pub struct MaskedSerializeStructWrapper<'a, S>
+    where S: SerializeStruct
 {
-    MaskedPassThrough {
-        serializer: &'a mut S,
-        mask: &'a Mask
-    },
-    Null
+    struct_serializer: S,
+    mask: &'a Mask
 }
 
-impl<'a, S> SerializeStruct for MaskedWrapper<'a, S>
-    where &'a mut S: Serializer
+// Note, the key here is going to be wrapping the individually passed things.
+// This is how we can track the state of the mask recursively
+
+impl<S> SerializeStruct for MaskedSerializeStructWrapper<'_, S>
+    where S: SerializeStruct
 {
-    type Ok = <&'a mut S as Serializer>::Ok;
-    type Error = <&'a mut S as Serializer>::Error;
+    type Ok = S::Ok;
+    type Error = S::Error;
 
     fn serialize_field<T: ?Sized>(&mut self, key: &'static str, value: &T) -> Result<(), Self::Error> where T: Serialize {
-        todo!()
+        if self.mask.properties.contains_key(key) {
+            self.struct_serializer.serialize_field()
+        }
+
+        Ok(())
     }
 
     fn skip_field(&mut self, key: &'static str) -> Result<(), Self::Error> {
-        match self {
-            MaskedWrapper::MaskedPassThrough { serializer, mask } => {
-                todo!()
-            },
-            MaskedWrapper::Null => Ok(())
+        if self.mask.properties.contains_key(key) {
+            self.struct_serializer.skip_field(key)?
         }
+
+        Ok(())
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        self.struct_serializer.end()
     }
 }
 
-impl<'a, S> SerializeMap for MaskedWrapper<'a, S>
-    where &'a mut S: Serializer
+pub struct MaskedSerializeMapWrapper<'a, S>
+    where S: SerializeMap
 {
-    type Ok = <&'a mut S as Serializer>::Ok;
-    type Error = <&'a mut S as Serializer>::Error;
+    map_serializer: S,
+    mask: &'a Mask
+}
+
+impl<S> SerializeMap for MaskedSerializeMapWrapper<'_, S>
+    where S: SerializeMap
+{
+    type Ok = S::Ok;
+    type Error = S::Error;
 
     fn serialize_key<T: ?Sized>(&mut self, key: &T) -> Result<(), Self::Error> where T: Serialize {
         todo!()
@@ -89,8 +99,8 @@ impl<'a, S> Serializer for &'a mut MaskedSerializer<'a, S>
     type SerializeTuple = <&'a mut S as Serializer>::SerializeTuple;
     type SerializeTupleStruct = <&'a mut S as Serializer>::SerializeTupleStruct;
     type SerializeTupleVariant = <&'a mut S as Serializer>::SerializeTupleVariant;
-    type SerializeMap = MaskedWrapper<'a, S>;
-    type SerializeStruct = MaskedWrapper<'a, S>;
+    type SerializeMap = MaskedSerializeMapWrapper<'a, <&'a mut S as Serializer>::SerializeMap>;
+    type SerializeStruct = MaskedSerializeStructWrapper<'a, <&'a mut S as Serializer>::SerializeStruct>;
     type SerializeStructVariant = <&'a mut S as Serializer>::SerializeStructVariant;
 
     fn serialize_bool(self, v: bool) -> Result<Self::Ok, Self::Error> {
@@ -202,11 +212,13 @@ impl<'a, S> Serializer for &'a mut MaskedSerializer<'a, S>
     }
 
     fn serialize_map(self, len: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
-        todo!()
+        let underlying_serializer = self.serializer.serialize_map(len)?;
+        Ok(MaskedSerializeMapWrapper { map_serializer: underlying_serializer, mask: &self.mask })
     }
 
     fn serialize_struct(self, name: &'static str, len: usize) -> Result<Self::SerializeStruct, Self::Error> {
-        todo!()
+        let underlying_serializer = self.serializer.serialize_struct(name, len)?;
+        Ok(MaskedSerializeStructWrapper { struct_serializer: underlying_serializer, mask: &self.mask })
     }
 
     fn serialize_struct_variant(self, name: &'static str, variant_index: u32, variant: &'static str, len: usize) -> Result<Self::SerializeStructVariant, Self::Error> {
