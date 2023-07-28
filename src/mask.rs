@@ -1,71 +1,129 @@
-use std::collections::HashMap;
-use std::path::Component::ParentDir;
-use serde_json::{Value, Map};
+use crate::serialize::Mask;
+use jsonschema::error::ValidationError;
+use jsonschema::JSONSchema;
 use serde::{Deserialize, Serialize, Serializer};
+use serde_json::error::Error;
+use serde_json::{Map, Value};
+use std::collections::HashMap;
+use thiserror::Error;
 
-// TODO: Reconcile this with the more generic "mask"
-pub struct JsonMask {
-    name: String,
-    properties: HashMap<String, JsonMask>
+pub struct ValidJsonSchema(Value);
+
+#[derive(Error, Debug)]
+pub enum ParseError {
+    #[error("serde json could not parse the invalid json")]
+    InvalidJson(#[from] Error),
+    #[error("the provided json was valid, but it wasn't a valid json schema")]
+    InvalidJsonSchema(String)
+    // TODO: is there a better way to handle the lifetime, or must it always be poisonous?
+    //InvalidJsonSchema(#[from] ValidationError<'static>),
 }
 
-impl From<&str> for JsonMask {
-    fn from(value: &str) -> Self {
-        todo!()
+impl ValidJsonSchema {
+    pub fn new(schema: Value) -> Result<Self, ParseError> {
+        match JSONSchema::compile(&schema) {
+            Ok(_) => Ok(ValidJsonSchema { 0: schema }),
+            Err(error) => Err(ParseError::InvalidJsonSchema(error.to_string()))
+        }
     }
 }
 
-impl From<&String> for JsonMask {
-    fn from(value: &String) -> Self {
-        todo!()
+pub fn from_str(json: &str) -> Result<Mask, ParseError> {
+    Ok(Mask::from(&ValidJsonSchema::new(serde_json::from_str::<
+        Value,
+    >(json)?)?))
+}
+
+pub fn from_reader<R>(reader: R) -> Result<Mask, ParseError>
+where
+    R: std::io::Read,
+{
+    Ok(Mask::from(&ValidJsonSchema::new(
+        serde_json::from_reader::<R, Value>(reader)?,
+    )?))
+}
+
+fn parse_schema_node(mask: &mut Mask, schema: &Value) {
+    // unwrap is safe, because we only recurse for objects, and we validate that the provided json
+    // conforms to "json schema" schema (not a typo).
+    let properties = schema.as_object().unwrap().get("properties").unwrap();
+
+    for (key, child) in properties.as_object().unwrap() {
+        let child = child.as_object().unwrap();
+
+        if child.get("type").unwrap() == "object" {
+            let mut child_mask = Mask::default();
+            parse_schema_node(&mut child_mask, child.get("properties").unwrap());
+
+            mask.properties.insert(key.clone(), Some(child_mask));
+        } else {
+            mask.properties.insert(key.clone(), None);
+        }
     }
 }
 
-impl From<&Value> for JsonMask {
-    fn from(value: &Value) -> Self {
-        todo!()
+impl From<&ValidJsonSchema> for Mask {
+    fn from(value: &ValidJsonSchema) -> Self {
+        let mut mask = Mask::default();
+
+        if value
+            .0
+            .as_object()
+            .unwrap()
+            .get("type")
+            .unwrap()
+            .as_str()
+            .unwrap()
+            == "object"
+        {
+            parse_schema_node(&mut mask, &value.0);
+        }
+
+        mask
     }
 }
 
 pub struct JsonMasker {
-    mask: JsonMask
+    mask: Mask,
 }
 
 impl JsonMasker {
-    pub fn new(mask: JsonMask) -> Self {
+    pub fn new(mask: Mask) -> Self {
         JsonMasker { mask }
     }
-    
+
     pub fn mask(&self, object: &mut Value) {
         if let Some(unwrapped_object) = object.as_object_mut() {
             self.mask_object(unwrapped_object, &self.mask)
         }
     }
 
-    fn mask_object(&self, object: &mut Map<String, Value>, mask_node: &JsonMask) {
-        object.retain(| key, value | {
-            match mask_node.properties.get(key) {
-                None => false,
-                Some(mask_child_node) => {
-                    if let Some(node) = value.as_object_mut() {
+    fn mask_object(&self, object: &mut Map<String, Value>, mask_node: &Mask) {
+        object.retain(|key, value| match mask_node.properties.get(key) {
+            None => false,
+            Some(mask_child_node) => {
+                if let Some(node) = value.as_object_mut() {
+                    if let Some(mask_child_node) = mask_child_node {
                         self.mask_object(node, mask_child_node)
                     }
-
-                    true
                 }
+
+                true
             }
         })
     }
 }
 
-struct Repro <S>
-    where S: Serializer
+struct Repro<S>
+where
+    S: Serializer,
 {
-    serializer: S
+    serializer: S,
 }
 
 impl<S> Repro<S>
-    where S: Serializer
+where
+    S: Serializer,
 {
     fn serialize_bool(self, v: bool) -> Result<S::Ok, S::Error> {
         self.serializer.serialize_bool(v)
@@ -74,51 +132,171 @@ impl<S> Repro<S>
 
 #[cfg(test)]
 mod tests {
-    use serde::Serializer;
-    use serde_json::ser::CompactFormatter;
-    use crate::serialize::{Mask, MaskedSerializer};
+    use serde_json::json;
     use super::*;
 
+    fn get_masker(schema: &str) -> JsonMasker {
+        JsonMasker::new(Mask::from(&ValidJsonSchema::new(serde_json::from_str(schema).unwrap()).unwrap()))
+    }
+
+    const ARBITRARY_VALUE: u64 = 12345;
+
+    fn get_metadata_json() -> Value {
+        json!({
+            "nonce": ARBITRARY_VALUE,
+            "vmId": ARBITRARY_VALUE
+        })
+    }
+
+    fn get_foobar_json() -> Value {
+        json!({
+            "foo": "foo-value",
+            "bar": "bar-value"
+        })
+    }
+
+    fn get_mixed_json() -> Value {
+        json!({
+            "nonce": 12345,
+            "foo": "foo-value"
+        })
+    }
+
     #[test]
-    fn happy_path_serialize_deserialize() {
-        let mut map: HashMap<&str, HashMap<&str, &str>> = HashMap::new();
+    pub fn mask_json_simple_schema_exact_match()
+    {
+        let mut json = get_metadata_json();
 
-        let mut m1 : HashMap<&str, &str> = HashMap::new();
-        m1.insert("a", "1");
-        m1.insert("b", "2");
+        get_masker(SIMPLE_SCHEMA).mask(&mut json);
 
-        let mut m2 : HashMap<&str, &str> = HashMap::new();
-        m1.insert("c", "3");
-        m1.insert("d", "4");
+        assert_eq!(arbitraryValue, json[L"nonce"].as_string());
+        assert_eq!(arbitraryValue, json[L"vmId"].as_string());
+    }
 
-        map.insert("m1", m1);
-        map.insert("m2", m2);
+    #[test]
+    pub fn mask_json_simple_schema_all_filtered()
+    {
+        let mut json = get_foobar_json();
 
-        let string = serde_json::to_string_pretty(&map).unwrap();
+        get_masker(SIMPLE_SCHEMA).mask(&mut json);
+        
+        assert_ne!(json.has_string_field(L"foo"));
+        assert_ne!(json.has_string_field(L"bar"));
+    }
 
-        let string2 = serde_json::to_string_pretty(&(3, 2)).unwrap();
+    #[test]
+    pub fn mask_json_simple_schema_partially_filtered()
+    {
+        let mut json = get_mixed_json();
 
-        let mut test = serde_json::Serializer::new(Vec::with_capacity(128));
+        get_masker(SIMPLE_SCHEMA).mask(&mut json);
 
-        test.serialize_bool(true).unwrap();
-        test.serialize_bool(true).unwrap();
+        assert_eq!(arbitraryValue, json[L"nonce"].as_string());
+        assert_ne!(json.has_string_field(L"foo"));
+    }
 
-        example(&mut test);
+    #[test]
+    pub fn mask_json_nested_schema_exact_match()
+    {
+        let mut json = get_metadata_json();
 
+        auto timestamp = web::json::value::object();
+        timestamp[L"createdOn"] = web::json::value(testValue);
+        timestamp[L"expiresOn"] = web::json::value(testValue);
+        json[L"timestamp"] = timestamp;
 
+        get_masker(NESTED_SCHEMA).mask(&mut json);
 
-        //let x = test.serialize_bool(true);
+        assert_eq!(arbitraryValue, json[L"nonce"].as_string());
+        assert_eq!(arbitraryValue, json[L"vmId"].as_string());
+        assert_eq!(arbitraryValue, json[L"timestamp"][L"createdOn"].as_string());
+        assert_eq!(arbitraryValue, json[L"timestamp"][L"expiresOn"].as_string());
+    }
 
-        //let x2 = test.serialize_bool(false);
+    #[test]
+    pub fn mask_json_nested_schema_all_filtered()
+    {
+        let mut json = get_foobar_json();
 
+        auto nestedObject = web::json::value::object();
+        nestedObject[L"foo"] = web::json::value(testValue);
+        nestedObject[L"bar"] = web::json::value(testValue);
+        json[L"foobar"] = nestedObject;
 
-        let x = 4+4;
-        // JsonMasker::from(r#"{ "asdf": "adsf" }"#);
+        get_masker(NESTED_SCHEMA).mask(&mut json);
 
-        // let json = serde_json::to_string(&key).unwrap();
+        assert_ne!(json.has_string_field(L"foo"));
+        assert_ne!(json.has_string_field(L"bar"));
+        assert_ne!(json.has_object_field(L"foobar"));
+    }
 
-        // let parsed_key: LatchableKey = serde_json::from_str(json.as_str()).unwrap();
+    #[test]
+    pub fn mask_json_nested_schema_partially_filtered()
+    {
+        let mut json = get_mixed_json();
+        let nested_object = json!({
+            "createdOn": 12345
+            "bar": uuid!("67e55044-10b1-426f-9247-bb680e5fe0c8");
+        });
 
-        // assert_eq!(key, parsed_key);
+        json.as_object_mut().unwrap().insert("timestamp".parse().unwrap(), nested_object);
+
+        get_masker(NESTED_SCHEMA).mask(&mut json);
+
+        assert_eq!(arbitraryValue, json[L"nonce"].as_string());
+        assert_ne!(json.has_string_field(L"foo"));
+        Assert::IsTrue(json.has_object_field(L"timestamp"));
+        assert_eq!(arbitraryValue, json[L"timestamp"][L"createdOn"].as_string());
     }
 }
+
+const SIMPLE_SCHEMA: &str = r#"
+{
+    "$schema": "http://json-schema.org/draft-04/schema",
+    "title": "Simple Schema",
+    "description": "Arbitrary object for testing",
+    "type": "object",
+    "properties": {
+        "nonce": {
+            "type": "string"
+        },
+        "vmId": {
+            "type": "string"
+        },
+        "foo2": {
+            "type": "string"
+        }
+    }
+}
+"#;
+
+const NESTED_SCHEMA: &str = r#"
+{
+    "$schema": "http://json-schema.org/draft-04/schema",
+    "title": "Simple Schema",
+    "description": "Arbitrary nested object for testing",
+    "type": "object",
+    "properties": {
+        "nonce": {
+            "type": "string"
+        },
+        "vmId": {
+            "type": "string"
+        },
+        "timestamp": {
+            "type": "object",
+            "properties": {
+                "createdOn": {
+                    "type": "string"
+                },
+                "expiresOn": {
+                    "type": "string"
+                }
+            }
+        },
+        "foo5": {
+            "type": "string"
+        }
+    }
+}
+"#;

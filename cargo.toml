@@ -7,3 +7,5 @@ authors = ["Chris Henk"]
 [dependencies]
 serde_json = "1.0.96"
 serde = "1.0.160"
+jsonschema = "0.17.1"
+thiserror = "1.0.44"

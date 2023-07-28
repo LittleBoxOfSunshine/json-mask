@@ -1,8 +1,8 @@
-use std::io;
-use serde::Serialize;
-use serde_json::Result;
-use serde_json::ser::PrettyFormatter;
 use crate::serialize::{Mask, MaskedSerializer};
+use serde::Serialize;
+use serde_json::ser::PrettyFormatter;
+use serde_json::Result;
+use std::io;
 
 // This is lifted directly from serde_json for consistency
 
@@ -22,9 +22,9 @@ macro_rules! tri {
 #[inline]
 #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
 pub fn to_writer<W, T>(mask: Mask, writer: W, value: &T) -> Result<()>
-    where
-        W: std::io::Write,
-        T: ?Sized + Serialize,
+where
+    W: std::io::Write,
+    T: ?Sized + Serialize,
 {
     let mut serializer = serde_json::Serializer::new(writer);
     let mut masked_serializer = MaskedSerializer::new(&mut serializer, mask);
@@ -34,9 +34,9 @@ pub fn to_writer<W, T>(mask: Mask, writer: W, value: &T) -> Result<()>
 #[inline]
 #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
 pub fn to_writer_pretty<W, T>(mask: Mask, writer: W, value: &T) -> Result<()>
-    where
-        W: std::io::Write,
-        T: ?Sized + Serialize,
+where
+    W: std::io::Write,
+    T: ?Sized + Serialize,
 {
     let mut serializer = serde_json::Serializer::pretty(writer);
     let mut masked_serializer = MaskedSerializer::new(&mut serializer, mask);
@@ -45,8 +45,8 @@ pub fn to_writer_pretty<W, T>(mask: Mask, writer: W, value: &T) -> Result<()>
 
 #[inline]
 pub fn to_vec<T>(mask: Mask, value: &T) -> Result<Vec<u8>>
-    where
-        T: ?Sized + Serialize,
+where
+    T: ?Sized + Serialize,
 {
     let mut writer = Vec::with_capacity(128);
     tri!(to_writer(mask, &mut writer, value));
@@ -55,8 +55,8 @@ pub fn to_vec<T>(mask: Mask, value: &T) -> Result<Vec<u8>>
 
 #[inline]
 pub fn to_vec_pretty<T>(mask: Mask, value: &T) -> Result<Vec<u8>>
-    where
-        T: ?Sized + Serialize,
+where
+    T: ?Sized + Serialize,
 {
     let mut writer = Vec::with_capacity(128);
     tri!(to_writer_pretty(mask, &mut writer, value));
@@ -65,8 +65,8 @@ pub fn to_vec_pretty<T>(mask: Mask, value: &T) -> Result<Vec<u8>>
 
 #[inline]
 pub fn to_string<T>(mask: Mask, value: &T) -> Result<String>
-    where
-        T: ?Sized + Serialize,
+where
+    T: ?Sized + Serialize,
 {
     let vec = tri!(to_vec(mask, value));
     let string = unsafe {
@@ -78,8 +78,8 @@ pub fn to_string<T>(mask: Mask, value: &T) -> Result<String>
 
 #[inline]
 pub fn to_string_pretty<T>(mask: Mask, value: &T) -> Result<String>
-    where
-        T: ?Sized + Serialize,
+where
+    T: ?Sized + Serialize,
 {
     let vec = tri!(to_vec_pretty(mask, value));
     let string = unsafe {
