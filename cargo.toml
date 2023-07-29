@@ -9,3 +9,6 @@ serde_json = "1.0.96"
 serde = "1.0.160"
 jsonschema = "0.17.1"
 thiserror = "1.0.44"
+
+[dev-dependencies]
+uuid = { version = "1.4.1", features = ["serde"] }

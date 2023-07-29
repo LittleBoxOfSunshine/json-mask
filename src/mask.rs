@@ -1,10 +1,8 @@
 use crate::serialize::Mask;
-use jsonschema::error::ValidationError;
 use jsonschema::JSONSchema;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::error::Error;
 use serde_json::{Map, Value};
-use std::collections::HashMap;
 use thiserror::Error;
 
 pub struct ValidJsonSchema(Value);
@@ -14,14 +12,14 @@ pub enum ParseError {
     #[error("serde json could not parse the invalid json")]
     InvalidJson(#[from] Error),
     #[error("the provided json was valid, but it wasn't a valid json schema")]
-    InvalidJsonSchema(String)
+    InvalidJsonSchema(String),
     // TODO: is there a better way to handle the lifetime, or must it always be poisonous?
     //InvalidJsonSchema(#[from] ValidationError<'static>),
 }
 
 impl ValidJsonSchema {
     pub fn new(schema: Value) -> Result<Self, ParseError> {
-        match JSONSchema::compile(&schema) {
+        match JSONSchema::options().should_ignore_unknown_formats(false).should_validate_formats(true).compile(&schema) {
             Ok(_) => Ok(ValidJsonSchema { 0: schema }),
             Err(error) => Err(ParseError::InvalidJsonSchema(error.to_string()))
         }
@@ -46,18 +44,20 @@ where
 fn parse_schema_node(mask: &mut Mask, schema: &Value) {
     // unwrap is safe, because we only recurse for objects, and we validate that the provided json
     // conforms to "json schema" schema (not a typo).
-    let properties = schema.as_object().unwrap().get("properties").unwrap();
+    if let Some(properties) = schema.as_object().unwrap().get("properties") {
+        if let Some(properties) = properties.as_object() {
+            for (key, child) in properties {
+                let child_object = child.as_object().unwrap().get("type");
 
-    for (key, child) in properties.as_object().unwrap() {
-        let child = child.as_object().unwrap();
+                if child_object.is_some() && child_object.unwrap() == "object" {
+                    let mut child_mask = Mask::default();
+                    parse_schema_node(&mut child_mask, &child);
 
-        if child.get("type").unwrap() == "object" {
-            let mut child_mask = Mask::default();
-            parse_schema_node(&mut child_mask, child.get("properties").unwrap());
-
-            mask.properties.insert(key.clone(), Some(child_mask));
-        } else {
-            mask.properties.insert(key.clone(), None);
+                    mask.properties.insert(key.clone(), Some(child_mask));
+                } else {
+                    mask.properties.insert(key.clone(), None);
+                }
+            }
         }
     }
 }
@@ -132,34 +132,65 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
     use serde_json::json;
+    use uuid::{Uuid, uuid};
     use super::*;
 
     fn get_masker(schema: &str) -> JsonMasker {
-        JsonMasker::new(Mask::from(&ValidJsonSchema::new(serde_json::from_str(schema).unwrap()).unwrap()))
+        JsonMasker::new(Mask::from(&get_valid_schema(schema).unwrap()))
     }
 
-    const ARBITRARY_VALUE: u64 = 12345;
+    fn get_valid_schema(schema: &str) -> Result<ValidJsonSchema, ParseError> {
+        ValidJsonSchema::new(serde_json::from_str(schema).unwrap())
+    }
+
+    const NONCE: u64 = 12345;
+    const VM_ID: Uuid = uuid!("19e656a1-b9ca-4344-88c9-ef0a6b5999e5");
+    const FOO: &'static str = "foo-value";
+    const BAR: &'static str = "bar-value";
+    const CREATED_ON: &'static str = "2023-07-28 17:59:14Z";
+    const EXPIRES_ON: &'static str = "2023-07-28 20:59:14Z";
 
     fn get_metadata_json() -> Value {
         json!({
-            "nonce": ARBITRARY_VALUE,
-            "vmId": ARBITRARY_VALUE
+            "nonce": 12345,
+            "vmId": VM_ID
         })
     }
 
     fn get_foobar_json() -> Value {
         json!({
-            "foo": "foo-value",
-            "bar": "bar-value"
+            "foo": FOO,
+            "bar": BAR
         })
     }
 
     fn get_mixed_json() -> Value {
         json!({
-            "nonce": 12345,
-            "foo": "foo-value"
+            "nonce": NONCE,
+            "foo": FOO
         })
+    }
+
+    #[test]
+    // There are lots of unwraps in the the masker parsing because it expects a valid schema.
+    // This test ensures that the valid schema wrapper is holding these invariants correctly.
+    pub fn bad_schema_no_panic() {
+        assert!(get_valid_schema(INVALID_SCHEMA_OBJECT).is_err());
+        assert!(get_valid_schema(INVALID_NESTED_SCHEMA).is_err());
+        assert!(get_valid_schema(INVALID_SCHEMA_NULL_TYPE).is_err());
+        assert!(get_valid_schema(INVALID_SCHEMA_NULL_PROPERTIES).is_err());
+        assert!(get_valid_schema(RANDOM_JSON).is_err());
+    }
+
+    #[test]
+    // Schema validator only checks that provided fields are valid, but missing information is
+    // allowed.
+    pub fn schema_missing_expected_fields_no_panic() {
+        get_masker(INVALID_SCHEMA_EMPTY_PROPERTIES);
+        get_masker(INVALID_SCHEMA_NO_TYPE);
+        get_masker(INVALID_SCHEMA_NO_PROPERTIES);
     }
 
     #[test]
@@ -169,8 +200,8 @@ mod tests {
 
         get_masker(SIMPLE_SCHEMA).mask(&mut json);
 
-        assert_eq!(arbitraryValue, json[L"nonce"].as_string());
-        assert_eq!(arbitraryValue, json[L"vmId"].as_string());
+        assert_eq!(NONCE, json["nonce"].as_u64().unwrap());
+        assert_eq!(VM_ID, Uuid::from_str(json["vmId"].as_str().unwrap()).unwrap());
     }
 
     #[test]
@@ -180,8 +211,8 @@ mod tests {
 
         get_masker(SIMPLE_SCHEMA).mask(&mut json);
         
-        assert_ne!(json.has_string_field(L"foo"));
-        assert_ne!(json.has_string_field(L"bar"));
+        assert!(json.get("foo").is_none());
+        assert!(json.get("bar").is_none());
     }
 
     #[test]
@@ -191,8 +222,12 @@ mod tests {
 
         get_masker(SIMPLE_SCHEMA).mask(&mut json);
 
-        assert_eq!(arbitraryValue, json[L"nonce"].as_string());
-        assert_ne!(json.has_string_field(L"foo"));
+        let test = json.get("nonce").unwrap();
+        let typ = test.is_u64();
+        let size = json.as_object().unwrap().len();
+
+        assert_eq!(NONCE, json["nonce"].as_u64().unwrap());
+        assert!(json.get("foo").is_none());
     }
 
     #[test]
@@ -200,17 +235,19 @@ mod tests {
     {
         let mut json = get_metadata_json();
 
-        auto timestamp = web::json::value::object();
-        timestamp[L"createdOn"] = web::json::value(testValue);
-        timestamp[L"expiresOn"] = web::json::value(testValue);
-        json[L"timestamp"] = timestamp;
+        let timestamp = json!({
+            "createdOn": CREATED_ON,
+            "expiresOn": EXPIRES_ON
+        });
+
+        json["timestamp"] = timestamp;
 
         get_masker(NESTED_SCHEMA).mask(&mut json);
 
-        assert_eq!(arbitraryValue, json[L"nonce"].as_string());
-        assert_eq!(arbitraryValue, json[L"vmId"].as_string());
-        assert_eq!(arbitraryValue, json[L"timestamp"][L"createdOn"].as_string());
-        assert_eq!(arbitraryValue, json[L"timestamp"][L"expiresOn"].as_string());
+        assert_eq!(NONCE, json["nonce"].as_u64().unwrap());
+        assert_eq!(VM_ID, Uuid::from_str(json["vmId"].as_str().unwrap()).unwrap());
+        assert_eq!(CREATED_ON, json["timestamp"]["createdOn"].as_str().unwrap());
+        assert_eq!(EXPIRES_ON, json["timestamp"]["expiresOn"].as_str().unwrap());
     }
 
     #[test]
@@ -218,16 +255,18 @@ mod tests {
     {
         let mut json = get_foobar_json();
 
-        auto nestedObject = web::json::value::object();
-        nestedObject[L"foo"] = web::json::value(testValue);
-        nestedObject[L"bar"] = web::json::value(testValue);
-        json[L"foobar"] = nestedObject;
+        let nested_object = json!({
+            "foo": FOO,
+            "bar": BAR
+        });
+
+        json["foobar"] = nested_object;
 
         get_masker(NESTED_SCHEMA).mask(&mut json);
 
-        assert_ne!(json.has_string_field(L"foo"));
-        assert_ne!(json.has_string_field(L"bar"));
-        assert_ne!(json.has_object_field(L"foobar"));
+        assert!(json.get("foo").is_none());
+        assert!(json.get("bar").is_none());
+        assert!(json.get("foobar").is_none());
     }
 
     #[test]
@@ -235,18 +274,19 @@ mod tests {
     {
         let mut json = get_mixed_json();
         let nested_object = json!({
-            "createdOn": 12345
-            "bar": uuid!("67e55044-10b1-426f-9247-bb680e5fe0c8");
+            "createdOn": CREATED_ON,
+            "bar": BAR
         });
 
-        json.as_object_mut().unwrap().insert("timestamp".parse().unwrap(), nested_object);
+        json["timestamp"] = nested_object;
 
         get_masker(NESTED_SCHEMA).mask(&mut json);
 
-        assert_eq!(arbitraryValue, json[L"nonce"].as_string());
-        assert_ne!(json.has_string_field(L"foo"));
-        Assert::IsTrue(json.has_object_field(L"timestamp"));
-        assert_eq!(arbitraryValue, json[L"timestamp"][L"createdOn"].as_string());
+        assert_eq!(NONCE, json["nonce"].as_u64().unwrap());
+        assert!(json.get("foo").is_none());
+        assert!(json.get("timestamp").unwrap().is_object());
+        assert_eq!(CREATED_ON, json["timestamp"]["createdOn"].as_str().unwrap());
+        assert!(json["timestamp"].get("bar").is_none());
     }
 }
 
@@ -298,5 +338,129 @@ const NESTED_SCHEMA: &str = r#"
             "type": "string"
         }
     }
+}
+"#;
+
+const INVALID_SCHEMA_OBJECT: &str = r#"
+{
+    "$schema": "http://json-schema.org/draft-04/schema",
+    "title": "Simple Schema",
+    "description": "Arbitrary object for testing",
+    "type": "potato",
+    "properties": {
+        "nonce": {
+            "type": "string"
+        },
+        "vmId": {
+            "type": "string"
+        },
+        "foo2": {
+            "type": "string"
+        }
+    }
+}
+"#;
+
+const INVALID_NESTED_SCHEMA: &str = r#"
+{
+    "$schema": "http://json-schema.org/draft-04/schema",
+    "title": "Simple Schema",
+    "description": "Arbitrary nested object for testing",
+    "type": "object",
+    "properties": {
+        "nonce": {
+            "type": "string"
+        },
+        "vmId": {
+            "type": "string"
+        },
+        "timestamp": {
+            "type": "potato",
+            "properties": {
+                "createdOn": {
+                    "type": "string"
+                },
+                "expiresOn": {
+                    "type": "string"
+                }
+            }
+        },
+        "foo5": {
+            "type": "string"
+        }
+    }
+}
+"#;
+
+const INVALID_SCHEMA_NO_TYPE: &str = r#"
+{
+    "$schema": "http://json-schema.org/draft-04/schema",
+    "title": "Simple Schema",
+    "description": "Arbitrary nested object for testing",
+    "type": "object",
+    "properties": {
+        "nonce": {
+        },
+        "vmId": {
+            "no_type": "string"
+        },
+        "foo5": {
+            "type": "string"
+        }
+    }
+}
+"#;
+
+const INVALID_SCHEMA_NULL_TYPE: &str = r#"
+{
+    "$schema": "http://json-schema.org/draft-04/schema",
+    "title": "Simple Schema",
+    "description": "Arbitrary nested object for testing",
+    "type": "object",
+    "properties": {
+        "nonce": {
+            "type": null
+        }
+    }
+}
+"#;
+
+const INVALID_SCHEMA_NO_PROPERTIES: &str = r#"
+{
+    "$schema": "http://json-schema.org/draft-04/schema",
+    "title": "Simple Schema",
+    "description": "Arbitrary nested object for testing",
+    "type": "object",
+    "no_properties": {
+
+    }
+}
+"#;
+
+const INVALID_SCHEMA_EMPTY_PROPERTIES: &str = r#"
+{
+    "$schema": "http://json-schema.org/draft-04/schema",
+    "title": "Simple Schema",
+    "description": "Arbitrary nested object for testing",
+    "type": "object",
+    "properties": {
+
+    }
+}
+"#;
+
+const INVALID_SCHEMA_NULL_PROPERTIES: &str = r#"
+{
+    "$schema": "http://json-schema.org/draft-04/schema",
+    "title": "Simple Schema",
+    "description": "Arbitrary nested object for testing",
+    "type": "object",
+    "properties": null
+}
+"#;
+
+const RANDOM_JSON: &str = r#"
+{
+    "this_is": "valid json but isn't a schema"
 }
 "#;
