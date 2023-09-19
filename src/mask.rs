@@ -1,5 +1,7 @@
 use crate::serialize::Mask;
-use jsonschema::JSONSchema;
+// extern crate valico;
+// extern crate valico;
+use valico::json_schema;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::error::Error;
 use serde_json::{Map, Value};
@@ -19,6 +21,11 @@ pub enum ParseError {
 
 impl ValidJsonSchema {
     pub fn new(schema: Value) -> Result<Self, ParseError> {
+
+        let mut scope = json_schema::Scope::new();
+        scope.
+        let schema = scope.compile_and_return(json_v4_schema.clone(), false).unwrap();
+
         match JSONSchema::options().should_ignore_unknown_formats(false).should_validate_formats(true).compile(&schema) {
             Ok(_) => Ok(ValidJsonSchema { 0: schema }),
             Err(error) => Err(ParseError::InvalidJsonSchema(error.to_string()))
