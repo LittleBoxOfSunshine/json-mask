@@ -1,9 +1,13 @@
-use crate::serialize::Mask;
-use serde_json::error::Error;
-use serde_json::{Map, Value};
-use thiserror::Error;
 use jsonschema;
 use jsonschema::JSONSchema;
+use std::collections::HashMap;
+use serde_json::{Error, Map, Value};
+use thiserror::Error;
+
+#[derive(Default)]
+pub struct Mask {
+    pub properties: HashMap<String, Option<Mask>>,
+}
 
 pub struct ValidJsonSchema(Value);
 
@@ -17,9 +21,19 @@ pub enum ParseError {
 
 impl ValidJsonSchema {
     pub fn new(schema: Value) -> Result<Self, ParseError> {
-        match JSONSchema::options().should_ignore_unknown_formats(false).should_validate_formats(true).compile(&schema) {
+        // JSONSchema will validate that the nested portion of a schema is valid, but if the root
+        // isn't then it will accept it anyway. This violates our invariants, so we need to check
+        // them explicitly at the root.
+        if !schema.is_object()
+            || !schema.as_object().unwrap().contains_key("type")
+            || !schema.as_object().unwrap().get("type").unwrap().is_string()
+        {
+            return Err(ParseError::InvalidJsonSchema("Invalid JSON Schema object".to_string()));
+        }
+
+        match JSONSchema::options().compile(&schema) {
             Ok(_) => Ok(ValidJsonSchema { 0: schema }),
-            Err(error) => Err(ParseError::InvalidJsonSchema(error.to_string()))
+            Err(error) => Err(ParseError::InvalidJsonSchema(error.to_string())),
         }
     }
 }
@@ -114,10 +128,10 @@ impl JsonMasker {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
-    use serde_json::json;
-    use uuid::{Uuid, uuid};
     use super::*;
+    use serde_json::json;
+    use std::str::FromStr;
+    use uuid::{uuid, Uuid};
 
     fn get_masker(schema: &str) -> JsonMasker {
         JsonMasker::new(Mask::from(&get_valid_schema(schema).unwrap()))
@@ -176,30 +190,30 @@ mod tests {
     }
 
     #[test]
-    pub fn mask_json_simple_schema_exact_match()
-    {
+    pub fn mask_json_simple_schema_exact_match() {
         let mut json = get_metadata_json();
 
         get_masker(SIMPLE_SCHEMA).mask(&mut json);
 
         assert_eq!(NONCE, json["nonce"].as_u64().unwrap());
-        assert_eq!(VM_ID, Uuid::from_str(json["vmId"].as_str().unwrap()).unwrap());
+        assert_eq!(
+            VM_ID,
+            Uuid::from_str(json["vmId"].as_str().unwrap()).unwrap()
+        );
     }
 
     #[test]
-    pub fn mask_json_simple_schema_all_filtered()
-    {
+    pub fn mask_json_simple_schema_all_filtered() {
         let mut json = get_foobar_json();
 
         get_masker(SIMPLE_SCHEMA).mask(&mut json);
-        
+
         assert!(json.get("foo").is_none());
         assert!(json.get("bar").is_none());
     }
 
     #[test]
-    pub fn mask_json_simple_schema_partially_filtered()
-    {
+    pub fn mask_json_simple_schema_partially_filtered() {
         let mut json = get_mixed_json();
 
         get_masker(SIMPLE_SCHEMA).mask(&mut json);
@@ -209,8 +223,7 @@ mod tests {
     }
 
     #[test]
-    pub fn mask_json_nested_schema_exact_match()
-    {
+    pub fn mask_json_nested_schema_exact_match() {
         let mut json = get_metadata_json();
 
         let timestamp = json!({
@@ -223,14 +236,16 @@ mod tests {
         get_masker(NESTED_SCHEMA).mask(&mut json);
 
         assert_eq!(NONCE, json["nonce"].as_u64().unwrap());
-        assert_eq!(VM_ID, Uuid::from_str(json["vmId"].as_str().unwrap()).unwrap());
+        assert_eq!(
+            VM_ID,
+            Uuid::from_str(json["vmId"].as_str().unwrap()).unwrap()
+        );
         assert_eq!(CREATED_ON, json["timestamp"]["createdOn"].as_str().unwrap());
         assert_eq!(EXPIRES_ON, json["timestamp"]["expiresOn"].as_str().unwrap());
     }
 
     #[test]
-    pub fn mask_json_nested_schema_all_filtered()
-    {
+    pub fn mask_json_nested_schema_all_filtered() {
         let mut json = get_foobar_json();
 
         let nested_object = json!({
@@ -248,8 +263,7 @@ mod tests {
     }
 
     #[test]
-    pub fn mask_json_nested_schema_partially_filtered()
-    {
+    pub fn mask_json_nested_schema_partially_filtered() {
         let mut json = get_mixed_json();
         let nested_object = json!({
             "createdOn": CREATED_ON,

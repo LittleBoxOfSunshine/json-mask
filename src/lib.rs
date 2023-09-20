@@ -1,4 +1,4 @@
-//! [![github]](https://github.com/LittleBoxOfSunshine/interruptible-polling)&ensp;[![crates-io]](https://crates.io/crates/interruptible_polling)&ensp;[![docs-rs]](https://docs.rs/interruptible_polling)
+//! [![github]](https://github.com/LittleBoxOfSunshine/json-mask)&ensp;[![crates-io]](https://crates.io/crates/json_mask)&ensp;[![docs-rs]](https://docs.rs/json_mask)
 //!
 //! [github]: https://img.shields.io/badge/github-8da0cb?style=for-the-badge&labelColor=555555&logo=github
 //! [crates-io]: https://img.shields.io/badge/crates.io-fc8d62?style=for-the-badge&labelColor=555555&logo=rust
@@ -83,14 +83,3 @@
 //!
 
 pub mod mask;
-pub mod serialize;
-
-mod json;
-
-//#[cfg(feature = "serde")]
-#[doc(inline)]
-pub use crate::json::{to_string, to_string_pretty, to_vec, to_vec_pretty};
-#[doc(inline)]
-pub use crate::json::{to_writer, to_writer_pretty};
-#[doc(inline)]
-pub use crate::serialize::MaskedSerializer;
