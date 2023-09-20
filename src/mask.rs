@@ -1,4 +1,3 @@
-use jsonschema;
 use jsonschema::JSONSchema;
 use serde_json::{Error, Map, Value};
 use std::collections::HashMap;

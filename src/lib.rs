@@ -50,9 +50,9 @@
 
 mod mask;
 
+pub use mask::from_reader;
+pub use mask::from_str;
 pub use mask::JsonMasker;
 pub use mask::Mask;
-pub use mask::ValidJsonSchema;
 pub use mask::ParseError;
-pub use mask::from_str;
-pub use mask::from_reader;
+pub use mask::ValidJsonSchema;
