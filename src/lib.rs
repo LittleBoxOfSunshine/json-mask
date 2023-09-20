@@ -9,6 +9,10 @@
 //! This library provides [`mask::JsonMasker`] which accepts a [JSON Schema](https://json-schema.org/)
 //! document.
 //!
+//! An example use case is an API where the backend generates the latest response version, but
+//! applies the mask to transform the latest response into other API versions to satisfy backwards
+//! compatibility.
+//!
 //! This is an early build where the input validation is more flexible. Based on real world usage
 //! the first stable release will probably restrict to formal schema draft standards and/or allow
 //! you to restrict to specific ones.
