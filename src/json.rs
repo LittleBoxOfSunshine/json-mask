@@ -1,8 +1,6 @@
 use crate::serialize::{Mask, MaskedSerializer};
 use serde::Serialize;
-use serde_json::ser::PrettyFormatter;
 use serde_json::Result;
-use std::io;
 
 // This is lifted directly from serde_json for consistency
 

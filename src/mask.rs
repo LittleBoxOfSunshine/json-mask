@@ -1,11 +1,9 @@
 use crate::serialize::Mask;
-// extern crate valico;
-// extern crate valico;
-use valico::json_schema;
-use serde::{Deserialize, Serialize, Serializer};
 use serde_json::error::Error;
 use serde_json::{Map, Value};
 use thiserror::Error;
+use jsonschema;
+use jsonschema::JSONSchema;
 
 pub struct ValidJsonSchema(Value);
 
@@ -15,17 +13,10 @@ pub enum ParseError {
     InvalidJson(#[from] Error),
     #[error("the provided json was valid, but it wasn't a valid json schema")]
     InvalidJsonSchema(String),
-    // TODO: is there a better way to handle the lifetime, or must it always be poisonous?
-    //InvalidJsonSchema(#[from] ValidationError<'static>),
 }
 
 impl ValidJsonSchema {
     pub fn new(schema: Value) -> Result<Self, ParseError> {
-
-        let mut scope = json_schema::Scope::new();
-        scope.
-        let schema = scope.compile_and_return(json_v4_schema.clone(), false).unwrap();
-
         match JSONSchema::options().should_ignore_unknown_formats(false).should_validate_formats(true).compile(&schema) {
             Ok(_) => Ok(ValidJsonSchema { 0: schema }),
             Err(error) => Err(ParseError::InvalidJsonSchema(error.to_string()))
@@ -121,22 +112,6 @@ impl JsonMasker {
     }
 }
 
-struct Repro<S>
-where
-    S: Serializer,
-{
-    serializer: S,
-}
-
-impl<S> Repro<S>
-where
-    S: Serializer,
-{
-    fn serialize_bool(self, v: bool) -> Result<S::Ok, S::Error> {
-        self.serializer.serialize_bool(v)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
@@ -229,10 +204,6 @@ mod tests {
 
         get_masker(SIMPLE_SCHEMA).mask(&mut json);
 
-        let test = json.get("nonce").unwrap();
-        let typ = test.is_u64();
-        let size = json.as_object().unwrap().len();
-
         assert_eq!(NONCE, json["nonce"].as_u64().unwrap());
         assert!(json.get("foo").is_none());
     }
@@ -295,9 +266,8 @@ mod tests {
         assert_eq!(CREATED_ON, json["timestamp"]["createdOn"].as_str().unwrap());
         assert!(json["timestamp"].get("bar").is_none());
     }
-}
 
-const SIMPLE_SCHEMA: &str = r#"
+    const SIMPLE_SCHEMA: &str = r#"
 {
     "$schema": "http://json-schema.org/draft-04/schema",
     "title": "Simple Schema",
@@ -317,7 +287,7 @@ const SIMPLE_SCHEMA: &str = r#"
 }
 "#;
 
-const NESTED_SCHEMA: &str = r#"
+    const NESTED_SCHEMA: &str = r#"
 {
     "$schema": "http://json-schema.org/draft-04/schema",
     "title": "Simple Schema",
@@ -348,7 +318,7 @@ const NESTED_SCHEMA: &str = r#"
 }
 "#;
 
-const INVALID_SCHEMA_OBJECT: &str = r#"
+    const INVALID_SCHEMA_OBJECT: &str = r#"
 {
     "$schema": "http://json-schema.org/draft-04/schema",
     "title": "Simple Schema",
@@ -368,7 +338,7 @@ const INVALID_SCHEMA_OBJECT: &str = r#"
 }
 "#;
 
-const INVALID_NESTED_SCHEMA: &str = r#"
+    const INVALID_NESTED_SCHEMA: &str = r#"
 {
     "$schema": "http://json-schema.org/draft-04/schema",
     "title": "Simple Schema",
@@ -399,7 +369,7 @@ const INVALID_NESTED_SCHEMA: &str = r#"
 }
 "#;
 
-const INVALID_SCHEMA_NO_TYPE: &str = r#"
+    const INVALID_SCHEMA_NO_TYPE: &str = r#"
 {
     "$schema": "http://json-schema.org/draft-04/schema",
     "title": "Simple Schema",
@@ -418,7 +388,7 @@ const INVALID_SCHEMA_NO_TYPE: &str = r#"
 }
 "#;
 
-const INVALID_SCHEMA_NULL_TYPE: &str = r#"
+    const INVALID_SCHEMA_NULL_TYPE: &str = r#"
 {
     "$schema": "http://json-schema.org/draft-04/schema",
     "title": "Simple Schema",
@@ -432,7 +402,7 @@ const INVALID_SCHEMA_NULL_TYPE: &str = r#"
 }
 "#;
 
-const INVALID_SCHEMA_NO_PROPERTIES: &str = r#"
+    const INVALID_SCHEMA_NO_PROPERTIES: &str = r#"
 {
     "$schema": "http://json-schema.org/draft-04/schema",
     "title": "Simple Schema",
@@ -444,7 +414,7 @@ const INVALID_SCHEMA_NO_PROPERTIES: &str = r#"
 }
 "#;
 
-const INVALID_SCHEMA_EMPTY_PROPERTIES: &str = r#"
+    const INVALID_SCHEMA_EMPTY_PROPERTIES: &str = r#"
 {
     "$schema": "http://json-schema.org/draft-04/schema",
     "title": "Simple Schema",
@@ -456,7 +426,7 @@ const INVALID_SCHEMA_EMPTY_PROPERTIES: &str = r#"
 }
 "#;
 
-const INVALID_SCHEMA_NULL_PROPERTIES: &str = r#"
+    const INVALID_SCHEMA_NULL_PROPERTIES: &str = r#"
 {
     "$schema": "http://json-schema.org/draft-04/schema",
     "title": "Simple Schema",
@@ -466,8 +436,9 @@ const INVALID_SCHEMA_NULL_PROPERTIES: &str = r#"
 }
 "#;
 
-const RANDOM_JSON: &str = r#"
+    const RANDOM_JSON: &str = r#"
 {
     "this_is": "valid json but isn't a schema"
 }
 "#;
+}
