@@ -1,7 +1,7 @@
 use jsonschema;
 use jsonschema::JSONSchema;
-use std::collections::HashMap;
 use serde_json::{Error, Map, Value};
+use std::collections::HashMap;
 use thiserror::Error;
 
 #[derive(Default)]
@@ -28,11 +28,13 @@ impl ValidJsonSchema {
             || !schema.as_object().unwrap().contains_key("type")
             || !schema.as_object().unwrap().get("type").unwrap().is_string()
         {
-            return Err(ParseError::InvalidJsonSchema("Invalid JSON Schema object".to_string()));
+            return Err(ParseError::InvalidJsonSchema(
+                "Invalid JSON Schema object".to_string(),
+            ));
         }
 
         match JSONSchema::options().compile(&schema) {
-            Ok(_) => Ok(ValidJsonSchema { 0: schema }),
+            Ok(_) => Ok(ValidJsonSchema(schema)),
             Err(error) => Err(ParseError::InvalidJsonSchema(error.to_string())),
         }
     }
@@ -63,7 +65,7 @@ fn parse_schema_node(mask: &mut Mask, schema: &Value) {
 
                 if child_object.is_some() && child_object.unwrap() == "object" {
                     let mut child_mask = Mask::default();
-                    parse_schema_node(&mut child_mask, &child);
+                    parse_schema_node(&mut child_mask, child);
 
                     mask.properties.insert(key.clone(), Some(child_mask));
                 } else {
@@ -143,10 +145,10 @@ mod tests {
 
     const NONCE: u64 = 12345;
     const VM_ID: Uuid = uuid!("19e656a1-b9ca-4344-88c9-ef0a6b5999e5");
-    const FOO: &'static str = "foo-value";
-    const BAR: &'static str = "bar-value";
-    const CREATED_ON: &'static str = "2023-07-28 17:59:14Z";
-    const EXPIRES_ON: &'static str = "2023-07-28 20:59:14Z";
+    const FOO: &str = "foo-value";
+    const BAR: &str = "bar-value";
+    const CREATED_ON: &str = "2023-07-28 17:59:14Z";
+    const EXPIRES_ON: &str = "2023-07-28 20:59:14Z";
 
     fn get_metadata_json() -> Value {
         json!({
