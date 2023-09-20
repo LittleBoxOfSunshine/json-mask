@@ -1,7 +1,7 @@
 [package]
 name = "json_mask"
 description = "Filter a JSON object as a tree to a subset using a JSON Schema as a mask"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2021"
 authors = ["Chris Henk <Chris.Henk@unobtainium.software>"]
 license = "MIT OR Apache-2.0"
