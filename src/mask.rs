@@ -107,17 +107,17 @@ impl JsonMasker {
 
     pub fn mask(&self, object: &mut Value) {
         if let Some(unwrapped_object) = object.as_object_mut() {
-            self.mask_object(unwrapped_object, &self.mask)
+            JsonMasker::mask_object(unwrapped_object, &self.mask)
         }
     }
 
-    fn mask_object(&self, object: &mut Map<String, Value>, mask_node: &Mask) {
+    fn mask_object(object: &mut Map<String, Value>, mask_node: &Mask) {
         object.retain(|key, value| match mask_node.properties.get(key) {
             None => false,
             Some(mask_child_node) => {
                 if let Some(node) = value.as_object_mut() {
                     if let Some(mask_child_node) = mask_child_node {
-                        self.mask_object(node, mask_child_node)
+                        JsonMasker::mask_object(node, mask_child_node)
                     }
                 }
 
